@@ -18,6 +18,7 @@ const WIDGET_ID = "codexstar-pompom-companion";
 export default function (pi: ExtensionAPI) {
 	let ctx: ExtensionContext | null = null;
 	let companionTimer: ReturnType<typeof setInterval> | null = null;
+	let voiceCheckTimer: ReturnType<typeof setInterval> | null = null;
 	let companionActive = false;
 	let lastRenderTime = Date.now();
 	let terminalInputUnsub: (() => void) | null = null;
@@ -30,7 +31,7 @@ export default function (pi: ExtensionAPI) {
 			const now = Date.now();
 			const dt = Math.min(0.1, (now - lastRenderTime) / 1000);
 			lastRenderTime = now;
-			return renderPompom(Math.max(40, width), 0, dt);
+			return renderPompom(Math.max(40, width), (globalThis as any).__piVoiceAudioLevel || 0, dt);
 		} catch {
 			// If rendering fails, return a minimal placeholder so the TUI doesn't crash
 			return [" ".repeat(Math.max(1, width))];
@@ -61,6 +62,13 @@ export default function (pi: ExtensionAPI) {
 		// Re-set widget on interval for animation. Defensive: clear any stale timer first.
 		if (companionTimer) clearInterval(companionTimer);
 		companionTimer = setInterval(setWidget, 150);
+		
+		if (voiceCheckTimer) clearInterval(voiceCheckTimer);
+		voiceCheckTimer = setInterval(() => {
+			const voiceRecording = (globalThis as any).__piVoiceRecording === true;
+			const audioLvl = (globalThis as any).__piVoiceAudioLevel || 0;
+			pompomSetTalking(voiceRecording);
+		}, 100);
 	}
 
 	function hideCompanion() {
@@ -68,6 +76,10 @@ export default function (pi: ExtensionAPI) {
 		if (companionTimer) {
 			clearInterval(companionTimer);
 			companionTimer = null;
+		}
+		if (voiceCheckTimer) {
+			clearInterval(voiceCheckTimer);
+			voiceCheckTimer = null;
 		}
 		pompomSetTalking(false);
 		try {
@@ -83,10 +95,10 @@ export default function (pi: ExtensionAPI) {
 	const optionUnicodeMap: Record<string, string> = {
 		"π": "p", "ƒ": "f", "∫": "b", "µ": "m", "ç": "c",
 		"∂": "d", "ß": "s", "∑": "w", "ø": "o",
-		"≈": "x", "†": "t", "˙": "h",
+		"≈": "x", "†": "t", "˙": "h", "©": "g",
 	};
 
-	const POMPOM_KEYS = "pfbmcdswoxth";
+	const POMPOM_KEYS = "pfbmcdswoxthg";
 
 	function setupKeyHandler() {
 		if (!ctx?.hasUI) return;
@@ -171,7 +183,7 @@ export default function (pi: ExtensionAPI) {
 	const pompomCommands: Record<string, string> = {
 		pet: "p", feed: "f", ball: "b", music: "m", color: "c", theme: "c",
 		sleep: "s", wake: "w", flip: "d", hide: "o",
-		dance: "x", treat: "t", hug: "h",
+		dance: "x", treat: "t", hug: "h", game: "g",
 	};
 
 	pi.registerCommand("pompom", {

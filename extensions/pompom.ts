@@ -14,7 +14,7 @@ const VIEW_OFFSET_Y = 0.2; // shift camera down so ground is visible in compact 
 const PHYSICS_DT = 0.016; // 60fps physics sub-stepping
 
 // ─── Pet State ───────────────────────────────────────────────────────────────
-type State = "idle" | "walk" | "flip" | "sleep" | "excited" | "chasing" | "fetching" | "singing" | "offscreen" | "peek" | "dance";
+type State = "idle" | "walk" | "flip" | "sleep" | "excited" | "chasing" | "fetching" | "singing" | "offscreen" | "peek" | "dance" | "game";
 
 const idleSpeech = [
 	"What are we building? 🤔", "This is fun! ✨", "Boop! 🐾",
@@ -23,6 +23,10 @@ const idleSpeech = [
 	"Hey! Look at me! 👋", "Tra la la~ 🎵", "*happy bounce*",
 ];
 let currentState: State = "idle";
+let gameScore = 0;
+let gameStars: {x: number, y: number, vy: number, caught: boolean}[] = [];
+let gameActive = false;
+let gameTimer = 0;
 
 let time = 0;
 let blinkFade = 0;
@@ -158,16 +162,13 @@ function getTimeOfDay(): TimeOfDay {
 	return "night";
 }
 
+let weatherState: Weather = "clear";
+let weatherTimer = 0;
+let lastWeatherChange = 0;
+let lastWeatherState: Weather = "clear";
+
 function getWeather(): Weather {
-	// Cycle weather based on minute within each hour for variety
-	const m = new Date().getMinutes();
-	if (m < 15) return "clear";
-	if (m < 25) return "cloudy";
-	if (m < 35) return "rain";
-	if (m < 40) return "storm";
-	if (m < 45) return "snow";
-	if (m < 55) return "cloudy";
-	return "clear";
+	return weatherState;
 }
 
 function getWeatherAndTime() {
@@ -622,6 +623,13 @@ function buildObjects(): RenderObj[] {
 
 	for (const f of foods) objects.push({ id: "food", mat: 6, x: f.x, y: f.y, r: 0.03, z: 0.1 });
 
+	if (gameActive) {
+		for (let i = 0; i < gameStars.length; i++) {
+			const s = gameStars[i];
+			if (!s.caught) objects.push({ id: "star" + i, mat: 3, x: s.x, y: s.y, r: 0.03, z: 0.15 });
+		}
+	}
+
 	objects.sort((a, b) => a.z - b.z);
 	for (const obj of objects) {
 		if (obj.rot !== undefined) { obj.s = Math.sin(obj.rot); obj.c = Math.cos(obj.rot); }
@@ -645,6 +653,35 @@ function updatePhysics(dt: number) {
 		lastNeedsTick = now;
 		if (!isSleeping) { energy = Math.max(0, energy - 0.5); hunger = Math.max(0, hunger - 0.8); }
 		else { energy = Math.min(100, energy + 5.0); hunger = Math.max(0, hunger - 0.2); }
+	}
+
+	weatherTimer -= dt;
+	if (time < 60) {
+		weatherState = "clear";
+		if (weatherTimer <= 0) weatherTimer = 45 + Math.random() * 45;
+	} else if (weatherTimer <= 0) {
+		weatherTimer = 45 + Math.random() * 45;
+		if (weatherState === "clear") weatherState = "cloudy";
+		else if (weatherState === "cloudy") {
+			const r = Math.random();
+			if (r < 0.33) weatherState = "rain";
+			else if (r < 0.66) weatherState = "snow";
+			else weatherState = "storm";
+		}
+		else if (weatherState === "rain") weatherState = "clear";
+		else if (weatherState === "snow") weatherState = "clear";
+		else if (weatherState === "storm") weatherState = "cloudy";
+	}
+
+	if (getWeather() !== lastWeatherState) {
+		lastWeatherState = getWeather();
+		let weatherAnnouncement = "";
+		if (lastWeatherState === "cloudy") weatherAnnouncement = "Clouds rolling in...";
+		else if (lastWeatherState === "rain") weatherAnnouncement = "It's starting to rain!";
+		else if (lastWeatherState === "storm") weatherAnnouncement = "A storm is brewing...";
+		else if (lastWeatherState === "snow") weatherAnnouncement = "Snowflakes!";
+		else if (lastWeatherState === "clear") weatherAnnouncement = "The sky is clearing up";
+		if (weatherAnnouncement) say(weatherAnnouncement, 3.0);
 	}
 
 	// Firefly
@@ -680,7 +717,61 @@ function updatePhysics(dt: number) {
 	}
 
 	// State machine
-	if (currentState === "idle") {
+	if (currentState === "game") {
+		gameTimer -= dt;
+		if (gameTimer <= 0) {
+			gameActive = false;
+			currentState = "idle";
+			say("Score: " + gameScore + "!", 3.0);
+			gameStars = [];
+			bounceY = 0;
+			lookX = 0;
+		} else {
+			if (Math.floor((time - dt) * 2) < Math.floor(time * 2)) {
+				gameStars.push({ x: (Math.random() - 0.5) * (getScreenEdgeX() * 1.5), y: -0.5, vy: 0.3, caught: false });
+			}
+			
+			let targetStar = null;
+			let minDist = Infinity;
+			for (let i = gameStars.length - 1; i >= 0; i--) {
+				const star = gameStars[i];
+				star.y += star.vy * dt;
+				if (star.y > 0.6) {
+					gameStars.splice(i, 1);
+					continue;
+				}
+				const distX = Math.abs(posX - star.x);
+				const distY = Math.abs((posY + bounceY) - star.y);
+				if (distX < 0.15 && distY < 0.15 && !star.caught) {
+					gameScore++;
+					star.caught = true;
+					gameStars.splice(i, 1);
+					particles.push({ x: star.x, y: star.y, vx: (Math.random() - 0.5)*0.5, vy: (Math.random() - 0.5)*0.5, char: "*", r: 255, g: 255, b: 0, life: 1.0, type: "sparkle" });
+					continue;
+				}
+				if (star.y < 0.5 && distX < minDist) {
+					minDist = distX;
+					targetStar = star;
+				}
+			}
+
+			if (targetStar) {
+				const dir = Math.sign(targetStar.x - posX);
+				if (Math.abs(targetStar.x - posX) > 0.05) {
+					posX += dir * dt * 0.8;
+					lookX = dir * 0.5;
+					bounceY = -Math.abs(Math.sin(time * 15)) * 0.08;
+				} else {
+					lookX = 0;
+					bounceY = 0;
+				}
+			} else {
+				lookX = 0;
+				bounceY = 0;
+			}
+		}
+	}
+	else if (currentState === "idle") {
 		if (Math.random() < 0.01) blinkFade = 1.0;
 		else blinkFade = Math.max(0, blinkFade - dt * 6.0);
 		bounceY += (0 - bounceY) * dt * 5.0;
@@ -1045,6 +1136,7 @@ export function pompomKeypress(key: string) {
 		say("A special treat! 🍰", 2.0);
 	}
 	else if (key === "h") { isSleeping = false; currentState = "excited"; actionTimer = 3.0; energy = Math.min(100, energy + 10); say("Aww, hugs! 💕"); }
+	else if (key === "g") { isSleeping = false; gameScore = 0; gameStars = []; gameActive = true; gameTimer = 20; currentState = "game"; say("Catch the stars!", 3.0); }
 }
 
 /** Reset companion state */
