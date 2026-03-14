@@ -155,10 +155,10 @@ type TimeOfDay = "dawn" | "morning" | "day" | "sunset" | "dusk" | "night";
 function getTimeOfDay(): TimeOfDay {
 	const h = new Date().getHours();
 	if (h >= 5 && h < 7) return "dawn";
-	if (h >= 7 && h < 10) return "morning";
-	if (h >= 10 && h < 16) return "day";
-	if (h >= 16 && h < 18) return "sunset";
-	if (h >= 18 && h < 20) return "dusk";
+	if (h >= 7 && h < 9) return "morning";
+	if (h >= 9 && h < 18) return "day";
+	if (h >= 18 && h < 19) return "sunset";
+	if (h >= 19 && h < 21) return "dusk";
 	return "night";
 }
 
