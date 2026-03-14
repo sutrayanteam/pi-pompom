@@ -45,7 +45,8 @@ export default function (pi: ExtensionAPI) {
 			const now = Date.now();
 			const dt = Math.min(0.1, (now - lastRenderTime) / 1000);
 			lastRenderTime = now;
-			return renderPompom(Math.max(40, width), (globalThis as any).__piVoiceAudioLevel || 0, dt);
+			const piListen = (globalThis as any).__piListen;
+			return renderPompom(Math.max(40, width), piListen?.audioLevel || 0, dt);
 		} catch {
 			// If rendering fails, return a minimal placeholder so the TUI doesn't crash
 			return [" ".repeat(Math.max(1, width))];
@@ -79,8 +80,8 @@ export default function (pi: ExtensionAPI) {
 		
 		if (voiceCheckTimer) clearInterval(voiceCheckTimer);
 		voiceCheckTimer = setInterval(() => {
-			const voiceRecording = (globalThis as any).__piVoiceRecording === true;
-			const audioLvl = (globalThis as any).__piVoiceAudioLevel || 0;
+			const piListen = (globalThis as any).__piListen;
+			const voiceRecording = piListen?.recording === true;
 			pompomSetTalking(voiceRecording);
 		}, 100);
 	}
