@@ -39,6 +39,15 @@ let hunger = 100;
 let energy = 100;
 let lastNeedsTick = 0;
 
+interface Accessories {
+	umbrella: boolean;
+	scarf: boolean;
+	sunglasses: boolean;
+	hat: boolean;
+}
+let accessories: Accessories = { umbrella: false, scarf: false, sunglasses: false, hat: false };
+let accessoryAsked: Record<string, boolean> = {};
+
 // Themes
 const themes = [
 	{ name: "Cloud", r: 245, g: 250, b: 255 },
@@ -420,7 +429,7 @@ function shadeObject(hit: ReturnType<typeof getObjHit>, px: number, py: number, 
 			// Open mouth when excited/talking
 			if (currentState === "excited" || currentState === "singing" || currentState === "dance" || speechTimer > 0 || isTalking) {
 				const mouthOpen = (speechTimer > 0 || currentState === "singing" || isTalking)
-					? (isTalking ? talkAudioLevel * 0.04 + 0.008 : Math.abs(Math.sin(time * 12)) * 0.03)
+					? (isTalking ? talkAudioLevel * 0.08 + 0.01 : Math.abs(Math.sin(time * 12)) * 0.03)
 					: 0.02;
 				if (mx * mx + (my + 0.012) ** 2 < mouthOpen && my < -0.01) {
 					r = 230; g = 70; b = 90;
@@ -460,6 +469,21 @@ function shadeObject(hit: ReturnType<typeof getObjHit>, px: number, py: number, 
 		r = 230; g = 210; b = 220;
 		const check = Math.sin(hitU * 20) * Math.sin(hitV * 20);
 		if (check > 0) { r = 200; g = 180; b = 200; }
+	} else if (hitObj.mat === 11) {
+		// Umbrella canopy — bright red
+		r = 220; g = 50; b = 50;
+		const stripe = Math.sin(hitU * 20);
+		if (stripe > 0.5) { r = 240; g = 70; b = 70; }
+		gloss = 32;
+	} else if (hitObj.mat === 12) {
+		// Scarf — warm striped
+		r = 200; g = 60; b = 60;
+		const stripe = Math.sin(hitU * 15);
+		if (stripe > 0.3) { r = 240; g = 220; b = 180; } // cream stripes
+	} else if (hitObj.mat === 13) {
+		// Sunglasses — dark reflective
+		r = 20; g = 20; b = 30;
+		gloss = 200;
 	}
 
 	// Lighting
@@ -687,6 +711,7 @@ function buildObjects(): RenderObj[] {
 	breathe = Math.sin(time * (isSleeping ? 1.5 : 3)) * 0.015;
 	let earWave = Math.sin(time * 4) * 0.08;
 	if (currentState === "excited" || currentState === "fetching" || currentState === "singing") earWave = Math.sin(time * 15) * 0.2;
+	if (isTalking) earWave = Math.sin(time * 12 + talkAudioLevel * 5) * 0.15;
 	if (isWalking) earWave += Math.sin(time * 10) * 0.1;
 	const pawSwing = (isWalking || currentState === "chasing" || currentState === "fetching" || currentState === "peek") ? Math.sin(time * 12) * 0.08 : 0;
 	const antRot = Math.sin(time * 2.5) * 0.15 + (isWalking || currentState === "fetching" ? Math.sin(time * 12) * 0.3 : 0);
@@ -728,6 +753,34 @@ function buildObjects(): RenderObj[] {
 			const s = gameStars[i];
 			if (!s.caught) objects.push({ id: "star" + i, mat: 3, x: s.x, y: s.y, r: 0.03, z: 0.15 });
 		}
+	}
+
+	const weather = getWeather();
+	const tod = getTimeOfDay();
+
+	// Umbrella — when raining/storming and user gave one
+	if ((weather === "rain" || weather === "storm") && accessories.umbrella) {
+		objects.push(
+			// Umbrella handle (thin stick above head)
+			{ id: "umbrella_handle", mat: 7, x: posX + 0.05, y: posY + bounceY + breathe - 0.38, rx: 0.008, ry: 0.12, z: 0.15 },
+			// Umbrella canopy (wide flat ellipse)
+			{ id: "umbrella_top", mat: 11, x: posX + 0.05, y: posY + bounceY + breathe - 0.50, rx: 0.18, ry: 0.04, z: 0.2 }
+		);
+	}
+
+	// Scarf — when snowing and user gave one
+	if (weather === "snow" && accessories.scarf) {
+		objects.push(
+			{ id: "scarf", mat: 12, x: posX, y: posY + bounceY + breathe + 0.18, rx: 0.15, ry: 0.035, z: 0.25 }
+		);
+	}
+
+	// Sunglasses — during bright day
+	if (tod === "day" && weather === "clear" && accessories.sunglasses) {
+		objects.push(
+			{ id: "sunglasses", mat: 13, x: posX - 0.07, y: posY + bounceY + breathe + 0.02, r: 0.035, z: 0.3 },
+			{ id: "sunglasses", mat: 13, x: posX + 0.07, y: posY + bounceY + breathe + 0.02, r: 0.035, z: 0.3 }
+		);
 	}
 
 	objects.sort((a, b) => a.z - b.z);
@@ -782,6 +835,21 @@ function updatePhysics(dt: number) {
 		else if (lastWeatherState === "snow") weatherAnnouncement = "Snowflakes!";
 		else if (lastWeatherState === "clear") weatherAnnouncement = "The sky is clearing up";
 		if (weatherAnnouncement) say(weatherAnnouncement, 3.0);
+
+		// Ask for accessories if user hasn't given them yet
+		const weather = getWeather();
+		if (weather === "rain" && !accessories.umbrella && !accessoryAsked.umbrella) {
+			accessoryAsked.umbrella = true;
+			setTimeout(() => { if (getWeather() === "rain" || getWeather() === "storm") say("I wish I had an umbrella... /pompom give umbrella", 5.0); }, 3000);
+		}
+		if (weather === "snow" && !accessories.scarf && !accessoryAsked.scarf) {
+			accessoryAsked.scarf = true;
+			setTimeout(() => { if (getWeather() === "snow") say("Brrr! A scarf would be nice... /pompom give scarf", 5.0); }, 3000);
+		}
+		if (weather === "storm" && !accessories.umbrella && !accessoryAsked.umbrella) {
+			accessoryAsked.umbrella = true;
+			setTimeout(() => say("This storm is scary! /pompom give umbrella", 5.0), 2000);
+		}
 	}
 
 	// Firefly
@@ -817,6 +885,38 @@ function updatePhysics(dt: number) {
 	}
 
 	// State machine
+	// Voice recording override — Pompom rushes to center and talks
+	if (isTalking) {
+		// Interrupt any current state except sleep
+		if (currentState !== "sleep" || energy > 30) {
+			if (isSleeping) { isSleeping = false; }
+			currentState = "idle"; // Reset state so talk animation takes over
+			
+			// Rush to center if not already there
+			const centerDist = Math.abs(posX);
+			if (centerDist > 0.05) {
+				const dir = Math.sign(0 - posX);
+				posX += dir * dt * 2.0; // Fast rush to center
+				isWalking = true;
+				bounceY = -Math.abs(Math.sin(time * 15)) * 0.08;
+			} else {
+				isWalking = false;
+				posX = 0;
+			}
+			
+			// Look at viewer (center)
+			lookX += (0 - lookX) * dt * 8.0;
+			lookY += (0 - lookY) * dt * 8.0;
+			
+			// Bounce with audio level — bigger bounce = louder voice
+			bounceY = -talkAudioLevel * 0.15 - Math.abs(Math.sin(time * 10)) * 0.03;
+			
+			// Ear wiggle synced to audio
+			// (ears already wiggle via earWave in buildObjects, but we can enhance by
+			//  modifying the earWave base in the existing code)
+		}
+	}
+
 	if (currentState === "game") {
 		gameTimer -= dt;
 		if (gameTimer <= 0) {
@@ -1237,6 +1337,8 @@ export function pompomKeypress(key: string) {
 	}
 	else if (key === "h") { isSleeping = false; currentState = "excited"; actionTimer = 3.0; energy = Math.min(100, energy + 10); say("Aww, hugs! 💕"); }
 	else if (key === "g") { isSleeping = false; gameScore = 0; gameStars = []; gameActive = true; gameTimer = 20; currentState = "game"; say("Catch the stars!", 3.0); }
+
+	// Accessory giving is handled separately via pompomGiveAccessory
 }
 
 /** Reset companion state */
@@ -1248,6 +1350,7 @@ export function resetPompom() {
 	talkAudioLevel = 0; flipPhase = 0;
 	hunger = 100; energy = 100; lastNeedsTick = 0;
 	activeTheme = 0;
+	accessoryAsked = {};
 	ballX = -10; ballY = -10; ballVx = 0; ballVy = 0; ballVz = 0; hasBall = false;
 	ffX = 0; ffY = 0; ffZ = 0;
 	targetX = 0;
@@ -1272,3 +1375,14 @@ export function pompomStatus(): { hunger: number; energy: number; mood: string; 
 export function pompomHeight(): number { return H + 1; }
 /** @deprecated Use pompomHeight() — this constant is stale after resize. */
 export const POMPOM_HEIGHT = H + 1;
+
+export function pompomGiveAccessory(item: string): string {
+	const key = item.toLowerCase().trim();
+	if (key === "umbrella") { accessories.umbrella = true; say("Yay, an umbrella! Thank you!"); return "Gave Pompom an umbrella!"; }
+	if (key === "scarf") { accessories.scarf = true; say("So warm and cozy! Thanks!"); return "Gave Pompom a scarf!"; }
+	if (key === "sunglasses") { accessories.sunglasses = true; say("Looking cool! Thanks!"); return "Gave Pompom sunglasses!"; }
+	if (key === "hat") { accessories.hat = true; say("I love hats! Thank you!"); return "Gave Pompom a hat!"; }
+	return "Unknown accessory. Try: umbrella, scarf, sunglasses, hat";
+}
+
+export function pompomGetAccessories(): Accessories { return { ...accessories }; }

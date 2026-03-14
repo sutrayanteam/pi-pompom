@@ -10,7 +10,21 @@ import type {
 	ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
 
-import { renderPompom, resetPompom, pompomSetTalking, pompomKeypress, pompomStatus } from "./pompom";
+import { renderPompom, resetPompom, pompomSetTalking, pompomKeypress, pompomStatus, pompomGiveAccessory, pompomGetAccessories } from "./pompom";
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
+
+// Persist accessories across sessions
+const SAVE_DIR = join(process.env.HOME || "~", ".pi", "pompom");
+const SAVE_FILE = join(SAVE_DIR, "accessories.json");
+
+function loadAccessories(): Record<string, boolean> {
+	try { return JSON.parse(readFileSync(SAVE_FILE, "utf-8")); } catch { return {}; }
+}
+
+function saveAccessories() {
+	try { mkdirSync(SAVE_DIR, { recursive: true }); writeFileSync(SAVE_FILE, JSON.stringify(pompomGetAccessories())); } catch {}
+}
 
 // Namespaced widget ID — prevents collision with any other extension
 const WIDGET_ID = "codexstar-pompom-companion";
@@ -156,6 +170,11 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, startCtx) => {
 		ctx = startCtx;
+		// Restore saved accessories from previous sessions
+		try {
+			const saved = loadAccessories();
+			for (const [k, v] of Object.entries(saved)) { if (v) pompomGiveAccessory(k); }
+		} catch {}
 		if (enabled) {
 			showCompanion();
 			setupKeyHandler();
@@ -226,7 +245,10 @@ export default function (pi: ExtensionAPI) {
 					`  /pompom wake       Wake up              ${m}w\n` +
 					`  /pompom theme      Cycle color          ${m}c\n` +
 					`  /pompom hide       Wander off           ${m}o\n` +
-					`  /pompom status     Check mood & stats`, "info"
+					`  /pompom game       Catch the stars!      ${m}g\n` +
+					`  /pompom status     Check mood & stats\n` +
+					`  /pompom give <item>  Give accessory (umbrella, scarf, sunglasses, hat)\n` +
+					`  /pompom inventory  See Pompom's bag`, "info"
 				);
 				return;
 			}
@@ -245,6 +267,22 @@ export default function (pi: ExtensionAPI) {
 					`  Energy: ${bar(s.energy)} ${s.energy}%\n` +
 					`  Theme:  ${s.theme}`, "info"
 				);
+				return;
+			}
+
+			if (sub.startsWith("give ") || sub.startsWith("give\t")) {
+				const item = sub.slice(5).trim();
+				if (!item) { cmdCtx.ui.notify("Usage: /pompom give <umbrella|scarf|sunglasses|hat>", "info"); return; }
+				const result = pompomGiveAccessory(item);
+				saveAccessories();
+				cmdCtx.ui.notify(result, "info");
+				return;
+			}
+
+			if (sub === "inventory" || sub === "inv") {
+				const acc = pompomGetAccessories();
+				const items = Object.entries(acc).filter(([, v]) => v).map(([k]) => k);
+				cmdCtx.ui.notify(items.length ? `🎒 Pompom's bag: ${items.join(", ")}` : "🎒 Pompom has no accessories yet. Try /pompom give umbrella", "info");
 				return;
 			}
 
