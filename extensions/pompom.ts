@@ -166,6 +166,8 @@ let weatherState: Weather = "clear";
 let weatherTimer = 0;
 let lastWeatherChange = 0;
 let lastWeatherState: Weather = "clear";
+let weatherBlend = 0;
+let prevWeatherColors = { rTop: 0, gTop: 0, bTop: 0, rBot: 0, gBot: 0, bBot: 0 };
 
 function getWeather(): Weather {
 	return weatherState;
@@ -176,35 +178,86 @@ function getWeatherAndTime() {
 	const weather = getWeather();
 	let rTop = 0, gTop = 0, bTop = 0, rBot = 0, gBot = 0, bBot = 0;
 
-	// Sky gradients per time of day
-	if (tod === "dawn") {
-		rTop = 40; gTop = 30; bTop = 80; rBot = 255; gBot = 140; bBot = 80;
-	} else if (tod === "morning") {
-		rTop = 60; gTop = 140; bTop = 255; rBot = 200; gBot = 220; bBot = 255;
-	} else if (tod === "day") {
-		rTop = 40; gTop = 120; bTop = 255; rBot = 180; gBot = 220; bBot = 255;
-	} else if (tod === "sunset") {
-		rTop = 140; gTop = 50; bTop = 120; rBot = 255; gBot = 120; bBot = 60;
-	} else if (tod === "dusk") {
-		rTop = 50; gTop = 20; bTop = 80; rBot = 120; gBot = 60; bBot = 80;
-	} else { // night
-		rTop = 5; gTop = 5; bTop = 15; rBot = 15; gBot = 10; bBot = 30;
+	const now = new Date();
+	const hour = now.getHours() + now.getMinutes() / 60;
+
+	// Define color keyframes
+	const keyframes = [
+		{ h: 4.0, t: [5, 5, 15], b: [12, 8, 25] },
+		{ h: 5.0, t: [40, 20, 60], b: [200, 100, 60] },
+		{ h: 7.0, t: [50, 130, 240], b: [170, 210, 250] },
+		{ h: 9.0, t: [35, 115, 255], b: [170, 215, 255] },
+		{ h: 17.0, t: [35, 115, 255], b: [170, 215, 255] },
+		{ h: 18.5, t: [160, 60, 40], b: [255, 130, 50] },
+		{ h: 20.0, t: [20, 15, 50], b: [40, 25, 60] },
+		{ h: 22.0, t: [5, 5, 15], b: [12, 8, 25] }
+	];
+
+	let k1 = keyframes[keyframes.length - 1];
+	let k2 = keyframes[0];
+	let h1 = k1.h - 24;
+	let h2 = k2.h;
+
+	for (let i = 0; i < keyframes.length - 1; i++) {
+		if (hour >= keyframes[i].h && hour < keyframes[i + 1].h) {
+			k1 = keyframes[i];
+			k2 = keyframes[i + 1];
+			h1 = k1.h;
+			h2 = k2.h;
+			break;
+		} else if (hour >= keyframes[keyframes.length - 1].h) {
+			k1 = keyframes[keyframes.length - 1];
+			k2 = keyframes[0];
+			h1 = k1.h;
+			h2 = k2.h + 24;
+			break;
+		}
 	}
+
+	const factor = (hour - h1) / (h2 - h1);
+
+	rTop = k1.t[0] + factor * (k2.t[0] - k1.t[0]);
+	gTop = k1.t[1] + factor * (k2.t[1] - k1.t[1]);
+	bTop = k1.t[2] + factor * (k2.t[2] - k1.t[2]);
+
+	rBot = k1.b[0] + factor * (k2.b[0] - k1.b[0]);
+	gBot = k1.b[1] + factor * (k2.b[1] - k1.b[1]);
+	bBot = k1.b[2] + factor * (k2.b[2] - k1.b[2]);
 
 	// Weather tinting — overcast dims the sky, storm darkens further
 	if (weather === "cloudy") {
-		rTop = Math.floor(rTop * 0.7 + 40); gTop = Math.floor(gTop * 0.7 + 40); bTop = Math.floor(bTop * 0.7 + 40);
-		rBot = Math.floor(rBot * 0.7 + 40); gBot = Math.floor(gBot * 0.7 + 40); bBot = Math.floor(bBot * 0.7 + 40);
+		rTop = rTop * 0.7 + 40; gTop = gTop * 0.7 + 40; bTop = bTop * 0.7 + 40;
+		rBot = rBot * 0.7 + 40; gBot = gBot * 0.7 + 40; bBot = bBot * 0.7 + 40;
 	} else if (weather === "rain") {
-		rTop = Math.floor(rTop * 0.5 + 30); gTop = Math.floor(gTop * 0.5 + 30); bTop = Math.floor(bTop * 0.5 + 40);
-		rBot = Math.floor(rBot * 0.5 + 30); gBot = Math.floor(gBot * 0.5 + 30); bBot = Math.floor(bBot * 0.5 + 40);
+		rTop = rTop * 0.5 + 30; gTop = gTop * 0.5 + 30; bTop = bTop * 0.5 + 40;
+		rBot = rBot * 0.5 + 30; gBot = gBot * 0.5 + 30; bBot = bBot * 0.5 + 40;
 	} else if (weather === "storm") {
-		rTop = Math.floor(rTop * 0.3 + 15); gTop = Math.floor(gTop * 0.3 + 15); bTop = Math.floor(bTop * 0.3 + 20);
-		rBot = Math.floor(rBot * 0.3 + 20); gBot = Math.floor(gBot * 0.3 + 20); bBot = Math.floor(bBot * 0.3 + 25);
+		rTop = rTop * 0.3 + 15; gTop = gTop * 0.3 + 15; bTop = bTop * 0.3 + 20;
+		rBot = rBot * 0.3 + 20; gBot = gBot * 0.3 + 20; bBot = bBot * 0.3 + 25;
 	} else if (weather === "snow") {
-		rTop = Math.floor(rTop * 0.6 + 60); gTop = Math.floor(gTop * 0.6 + 60); bTop = Math.floor(bTop * 0.6 + 70);
-		rBot = Math.floor(rBot * 0.6 + 60); gBot = Math.floor(gBot * 0.6 + 60); bBot = Math.floor(bBot * 0.6 + 70);
+		rTop = rTop * 0.6 + 60; gTop = gTop * 0.6 + 60; bTop = bTop * 0.6 + 70;
+		rBot = rBot * 0.6 + 60; gBot = gBot * 0.6 + 60; bBot = bBot * 0.6 + 70;
 	}
+
+	if (weather !== lastWeatherState) {
+		weatherBlend = 1.0;
+		lastWeatherState = weather;
+	}
+
+	if (weatherBlend > 0) {
+		rTop = rTop * (1 - weatherBlend) + prevWeatherColors.rTop * weatherBlend;
+		gTop = gTop * (1 - weatherBlend) + prevWeatherColors.gTop * weatherBlend;
+		bTop = bTop * (1 - weatherBlend) + prevWeatherColors.bTop * weatherBlend;
+		rBot = rBot * (1 - weatherBlend) + prevWeatherColors.rBot * weatherBlend;
+		gBot = gBot * (1 - weatherBlend) + prevWeatherColors.gBot * weatherBlend;
+		bBot = bBot * (1 - weatherBlend) + prevWeatherColors.bBot * weatherBlend;
+		weatherBlend = Math.max(0, weatherBlend - 0.02);
+	}
+
+	rTop = Math.floor(rTop); gTop = Math.floor(gTop); bTop = Math.floor(bTop);
+	rBot = Math.floor(rBot); gBot = Math.floor(gBot); bBot = Math.floor(bBot);
+	
+	prevWeatherColors = { rTop, gTop, bTop, rBot, gBot, bBot };
 
 	return { rTop, gTop, bTop, rBot, gBot, bBot, isNight: tod === "night" || tod === "dusk", weather, timeOfDay: tod };
 }
@@ -514,14 +567,53 @@ function getPixel(px: number, py: number, objects: RenderObj[], skyColors: Retur
 		bgB = Math.min(255, bgB + 40);
 	}
 
+	const now = new Date();
+	const hour = now.getHours() + now.getMinutes() / 60;
+
+	// DISTANT HILLS
+	if (py > 0.35 + Math.sin(px * 4) * 0.06 + Math.sin(px * 7) * 0.03 && py < 0.6) {
+		const hr = skyColors.isNight ? 20 : 60;
+		const hg = skyColors.isNight ? 40 : 100;
+		const hb = skyColors.isNight ? 30 : 80;
+		bgR = Math.floor(bgR * 0.5 + hr * 0.5);
+		bgG = Math.floor(bgG * 0.5 + hg * 0.5);
+		bgB = Math.floor(bgB * 0.5 + hb * 0.5);
+	}
+
+	// GROUND PLANTS
+	if (py > 0.5 && py < 0.6) {
+		const sway = Math.sin(time * 2 + px * 10) * 0.005;
+		if (Math.sin(px * 60) * 0.03 + 0.55 + sway > py) {
+			const tipVal = Math.sin(px * 100);
+			bgR = tipVal > 0 ? 50 : 30;
+			bgG = tipVal > 0 ? 120 : 80;
+			bgB = tipVal > 0 ? 30 : 20;
+
+			if (Math.sin(px * 17) > 0.95) {
+				const isYellow = Math.sin(px * 31) > 0;
+				bgR = isYellow ? 240 : 220;
+				bgG = isYellow ? 220 : 120;
+				bgB = isYellow ? 80 : 140;
+			}
+		}
+	}
+
 	// STARS & MOON (dimmer stars)
-	if (skyColors.isNight) {
-		const moonDist = Math.sqrt((px - 0.4) ** 2 + (py + 0.4) ** 2);
+	if (skyColors.isNight || hour >= 20 || hour < 5) {
+		const moonDx = px - (-0.4);
+		const moonDy = py - (-0.35);
+		const moonDist = Math.sqrt(moonDx * moonDx + moonDy * moonDy);
+		
 		if (moonDist < 0.15) {
-			const moonGlow = 1.0 - (moonDist / 0.15);
-			bgR = Math.min(255, bgR + moonGlow * 60);
-			bgG = Math.min(255, bgG + moonGlow * 60);
-			bgB = Math.min(255, bgB + moonGlow * 80);
+			const isCrescentDark = moonDist < 0.035 && moonDx > 0.01;
+			if (moonDist < 0.035 && !isCrescentDark) {
+				bgR = 230; bgG = 235; bgB = 255;
+			} else if (moonDist >= 0.035) {
+				const glow = 1.0 - (moonDist / 0.15);
+				bgR = Math.min(255, bgR + glow * 40);
+				bgG = Math.min(255, bgG + glow * 40);
+				bgB = Math.min(255, bgB + glow * 60);
+			}
 		}
 		
 		const starPattern = Math.sin(px * 150) * Math.cos(py * 150 + px * 40);
@@ -541,31 +633,39 @@ function getPixel(px: number, py: number, objects: RenderObj[], skyColors: Retur
 		}
 	}
 
-	// SUNSET/DAWN: subtle warm glow
-	if (tod === "sunset" || tod === "dawn") {
-		const sunDist = Math.sqrt((px + 0.3) ** 2 + (py - 0.2) ** 2);
-		const halo = Math.max(0, 1.0 - sunDist * 2.0);
-		if (halo > 0) {
-			const hIntensity = Math.pow(halo, 2) * 0.5; // more subtle
-			bgR = Math.min(255, bgR + hIntensity * 120);
-			bgG = Math.min(255, bgG + hIntensity * (tod === "sunset" ? 70 : 90));
-			bgB = Math.min(255, bgB + hIntensity * 40);
+	// SUN (daytime)
+	if (hour >= 7 && hour < 17) {
+		const sunDx = px - 0.5;
+		const sunDy = py - (-0.3);
+		const sunDist = Math.sqrt(sunDx * sunDx + sunDy * sunDy);
+		if (sunDist < 0.2) {
+			if (sunDist < 0.04) {
+				bgR = 255; bgG = 250; bgB = 220;
+			} else {
+				const halo = 1.0 - (sunDist / 0.2);
+				const hIntensity = halo * halo;
+				bgR = Math.min(255, bgR + hIntensity * 100);
+				bgG = Math.min(255, bgG + hIntensity * 90);
+				bgB = Math.min(255, bgB + hIntensity * 60);
+			}
 		}
 	}
 
-	// CLOUDS: SUBTLE only. Small, soft wisps. Only upper 30% of sky. Opacity max 0.15. Light gray-white.
-	if ((w === "cloudy" || w === "rain" || w === "storm" || w === "snow") && py < -0.4) {
+	// CLOUDS: SUBTLE only. Small, soft wisps. Only upper 30% of sky.
+	if (py < -0.4) {
 		const drift = time * 0.05; // drift slowly
 		const n1 = Math.sin((px + drift) * 4) * Math.cos(py * 6) * 0.5 + 0.5;
 		const n2 = Math.sin((px - drift * 0.5) * 8 + py * 10) * 0.5 + 0.5;
 		const noise = n1 * 0.6 + n2 * 0.4;
 		
 		if (noise > 0.6) {
-			const blend = Math.min(0.15, (noise - 0.6) * 0.5); // Max opacity 0.15
+			let maxOpacity = 0.15;
+			let cr = 240, cg = 245, cb = 255;
 			
-			const cr = w === "storm" ? 100 : 240;
-			const cg = w === "storm" ? 105 : 245;
-			const cb = w === "storm" ? 115 : 255;
+			if (w === "storm") { cr = 100; cg = 105; cb = 110; }
+			else if (w === "clear" || !w) { maxOpacity = 0.08; }
+			
+			const blend = Math.min(maxOpacity, (noise - 0.6) * 0.5);
 
 			bgR = Math.floor(bgR * (1 - blend) + cr * blend);
 			bgG = Math.floor(bgG * (1 - blend) + cg * blend);
