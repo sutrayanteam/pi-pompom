@@ -650,9 +650,11 @@ function renderToBuffers() {
 	const objects = buildObjects();
 	const skyColors = getWeatherAndTime();
 
-	// 4×4 supersampling for maximum anti-aliasing on half-block fallback
-	const step = scale * 0.25;
-	const offsets = [-0.375, -0.125, 0.125, 0.375]; // 4 sub-pixel positions
+	// Hybrid renderer: quadrant blocks at edges (2× horizontal detail),
+	// half-blocks in smooth areas (better gradient color).
+	// 16 Unicode quadrant characters: 4 sub-pixels (2×2) per cell, 2 colors each.
+	const QUAD = " \u2597\u2596\u2584\u259D\u2590\u259E\u259F\u2598\u259A\u258C\u2599\u2580\u259C\u259B\u2588";
+	const halfX = scale * 0.25;
 
 	for (let cy = 0; cy < H; cy++) {
 		for (let cx = 0; cx < W; cx++) {
@@ -660,22 +662,50 @@ function renderToBuffers() {
 			const py1 = (cy * 2.0 - H) * scale + VIEW_OFFSET_Y;
 			const py2 = (cy * 2.0 + 1.0 - H) * scale + VIEW_OFFSET_Y;
 
-			// Top half: 4×4 supersample (16 samples)
-			let tr = 0, tg = 0, tb = 0;
-			for (const oy of offsets) for (const ox of offsets) {
-				const c = getPixel(px + ox * step, py1 + oy * step, objects, skyColors);
-				tr += c[0]; tg += c[1]; tb += c[2];
+			// Sample 4 quadrant centers (TL, TR, BL, BR)
+			const tl = getPixel(px - halfX, py1, objects, skyColors);
+			const tr = getPixel(px + halfX, py1, objects, skyColors);
+			const bl = getPixel(px - halfX, py2, objects, skyColors);
+			const br = getPixel(px + halfX, py2, objects, skyColors);
+
+			// Edge detection: max color difference across the 4 quadrants
+			let maxD = 0;
+			const cs = [tl, tr, bl, br];
+			for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) {
+				const d = Math.abs(cs[i][0] - cs[j][0]) + Math.abs(cs[i][1] - cs[j][1]) + Math.abs(cs[i][2] - cs[j][2]);
+				if (d > maxD) maxD = d;
 			}
 
-			// Bottom half: 4×4 supersample (16 samples)
-			let br = 0, bg = 0, bb = 0;
-			for (const oy of offsets) for (const ox of offsets) {
-				const c = getPixel(px + ox * step, py2 + oy * step, objects, skyColors);
-				br += c[0]; bg += c[1]; bb += c[2];
-			}
+			if (maxD > 60) {
+				// EDGE CELL — use quadrant character for 2× horizontal detail
+				const lum0 = tl[0] * 77 + tl[1] * 150 + tl[2] * 29;
+				const lum1 = tr[0] * 77 + tr[1] * 150 + tr[2] * 29;
+				const lum2 = bl[0] * 77 + bl[1] * 150 + bl[2] * 29;
+				const lum3 = br[0] * 77 + br[1] * 150 + br[2] * 29;
+				const med = (Math.min(lum0, lum1, lum2, lum3) + Math.max(lum0, lum1, lum2, lum3)) / 2;
 
-			screenChars[cy][cx] = "▀";
-			screenColors[cy][cx] = `\x1b[38;2;${tr >> 4};${tg >> 4};${tb >> 4}m\x1b[48;2;${br >> 4};${bg >> 4};${bb >> 4}m`;
+				const b0 = lum0 >= med ? 1 : 0, b1 = lum1 >= med ? 1 : 0;
+				const b2 = lum2 >= med ? 1 : 0, b3 = lum3 >= med ? 1 : 0;
+				const pattern = (b0 << 3) | (b1 << 2) | (b2 << 1) | b3;
+
+				// Average fg (bright) and bg (dark) group colors
+				let fR = 0, fG = 0, fB = 0, fN = 0;
+				let bR = 0, bG = 0, bB = 0, bN = 0;
+				const bits = [b0, b1, b2, b3];
+				for (let i = 0; i < 4; i++) {
+					if (bits[i]) { fR += cs[i][0]; fG += cs[i][1]; fB += cs[i][2]; fN++; }
+					else { bR += cs[i][0]; bG += cs[i][1]; bB += cs[i][2]; bN++; }
+				}
+				if (!fN) { fR = bR; fG = bG; fB = bB; fN = bN; }
+				if (!bN) { bR = fR; bG = fG; bB = fB; bN = fN; }
+
+				screenChars[cy][cx] = QUAD[pattern];
+				screenColors[cy][cx] = `\x1b[38;2;${Math.round(fR / fN)};${Math.round(fG / fN)};${Math.round(fB / fN)}m\x1b[48;2;${Math.round(bR / bN)};${Math.round(bG / bN)};${Math.round(bB / bN)}m`;
+			} else {
+				// SMOOTH CELL — half-block with averaged top/bottom
+				screenChars[cy][cx] = "▀";
+				screenColors[cy][cx] = `\x1b[38;2;${(tl[0] + tr[0]) >> 1};${(tl[1] + tr[1]) >> 1};${(tl[2] + tr[2]) >> 1}m\x1b[48;2;${(bl[0] + br[0]) >> 1};${(bl[1] + br[1]) >> 1};${(bl[2] + br[2]) >> 1}m`;
+			}
 		}
 	}
 
